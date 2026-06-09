@@ -1,0 +1,558 @@
+---
+title: "Time Series Analysis of the US Unemployment Rate"
+subtitle: "PSTAT 174/274 Final Project"
+author: "Mathilde Gourlin  \nmathildegourlin@ucsb.edu"
+date: "2026-05-10"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+library(tidyverse)
+library(forecast)
+library(tseries)
+library(ggplot2)
+```
+
+```{r load-data, include=FALSE}
+
+library(tidyverse)
+library(forecast)
+library(tseries)
+library(ggplot2)
+
+unrate_raw <- read.csv("UNRATE.csv")
+
+colnames(unrate_raw) <- c("Date", "UNRATE")
+
+unrate_raw$Date <- as.Date(unrate_raw$Date)
+
+df <- unrate_raw %>%
+  filter(Date >= as.Date("2010-01-01") & Date <= as.Date("2023-12-01"))
+
+ts_data   <- ts(df$UNRATE, start = c(2010, 1), frequency = 12)
+diff_data <- diff(ts_data)
+
+diff_data
+head(diff_data)
+```
+
+## Abstract
+
+This project analyzes the US monthly unemployment rate from January 2010 through December 2023 using time series analysis methods. The unemployment rate is one of the most widely tracked economic indicators in the United States and reflects the overall health of the labor market across different economic cycles. The dataset spans a period that includes the post-Great Recession recovery, the longest economic expansion in US history, and the dramatic labor market disruption caused by the COVID-19 pandemic in 2020.
+
+The purpose of this project is to analyze how the US unemployment rate behaved during this period using the Box-Jenkins approach and formal unit root testing. The project applies ARIMA modeling as the primary method and unit root analysis using the Augmented Dickey-Fuller and Phillips-Perron tests as the second method. Exploratory analysis, transformations, stationarity testing, ACF and PACF diagnostics, model estimation, residual diagnostics, and forecasting are used to study the data. Results show that the original unemployment rate series is nonstationary and contains a unit root, while the first-differenced series is stationary and displays meaningful autoregressive and moving average structure that can be captured by an ARIMA model.
+
+\newpage
+
+## 1. Introduction
+
+The US unemployment rate measures the share of the civilian labor force that is actively seeking work but does not currently have a job. It is published monthly by the Bureau of Labor Statistics and is one of the most closely watched economic statistics in the country. It is used by policymakers, investors, and economists to understand how the labor market is doing and to make decisions about economic policy.
+
+The period from 2010 to 2023 is especially interesting from a time series perspective because it captures a complete economic cycle. The early years of the dataset reflect a slow and steady recovery from the 2008 financial crisis, followed by a decade of job growth and historically low unemployment rates. The COVID-19 pandemic in 2020 brought the most dramatic labor market shock in modern US history. Cajner et al. documented that the unemployment rate jumped from 3.5 percent in February 2020 to 14.7 percent in April 2020, a rise of more than 10 percentage points in a single month that was historically unprecedented since data collection began in 1948. The subsequent recovery was rapid, with the rate returning to pre-pandemic levels by 2022.
+
+Prior work has applied time series methods to US unemployment data. Montgomery, Zarnowitz, Tsay, and Tiao studied the US unemployment rate and found that models using lagged values of the rate along with leading indicators like jobless claims produced the most accurate forecasts. Proietti found that decomposing the series into trend and cycle components improved forecast performance over standard ARIMA models. More recently, Dritsaki applied SARIMA models to monthly unemployment data and demonstrated that incorporating seasonal structure further improved forecasting accuracy for monthly labor market series. The present project builds on this foundation using the Box-Jenkins framework and formal unit root testing, with a focus on the 2010 to 2023 period that includes both the longest expansion in US history and the COVID-19 structural break.
+
+The purpose of this project is to analyze US labor market behavior during this period and apply the time series methods covered in this course to a dataset with rich and interpretable structure. One important discovery from the exploratory analysis is the COVID-19 spike in April 2020, which stands as an extreme outlier far outside the range of ordinary month-to-month variation and creates a structural break that standard ARIMA models cannot fully capture. A second important discovery is that the unemployment rate series contains a unit root in levels, meaning it behaves like a random walk and shocks to it have persistent effects, while the first-differenced series is stationary. This finding motivates the differencing step in the Box-Jenkins approach and connects directly to the unit root framework in Chapter 5 of Shumway and Stoffer.
+
+\newpage
+
+## 2. Data
+
+### 2.1 Dataset Description
+
+The dataset contains monthly US unemployment rate observations sourced from the FRED database maintained by the Federal Reserve Bank of St. Louis, which publishes official economic data from the Bureau of Labor Statistics. The unemployment rate is defined as the number of unemployed persons as a percent of the total civilian labor force aged 16 and older and is seasonally adjusted by the BLS using the X-13ARIMA-SEATS procedure.
+
+The dataset begins in January 2010 and ends in December 2023. The frequency of the dataset is monthly, with one observation per month. The dataset contains 168 total observations. The unemployment rate is measured as a percentage.
+
+```{r head-output}
+head(df)
+```
+
+```{r nrow-output}
+nrow(df)
+```
+
+Over the full sample, the mean unemployment rate is `r round(mean(df$UNRATE), 2)` percent and the standard deviation is `r round(sd(df$UNRATE), 2)` percent. The minimum value is `r min(df$UNRATE)` percent and the maximum value is `r max(df$UNRATE)` percent, which occurred in April 2020.
+
+### 2.2 Reason for Choosing the Dataset
+
+I chose this dataset because the job market has been on my mind a lot lately as I get closer to graduation. Unemployment has been rising and finding a job after college feels more uncertain than it did a few years ago, so I wanted to understand what the data actually shows about how the labor market changes over time. Studying the unemployment rate felt more personally relevant than picking a dataset I had no connection to. The dataset also gave me a chance to apply all of the methods from this course to something with real structure, since the unemployment rate has a clear trend, meaningful autocorrelation, and a visible seasonal pattern that financial return data typically does not have. The COVID-19 period adds another layer that I found interesting to analyze, since it shows how a sudden external shock appears in time series data and how the labor market eventually recovered from it.
+
+### 2.3 Data Source
+
+The dataset was downloaded directly from the FRED database maintained by the Federal Reserve Bank of St. Louis. FRED makes official economic data from US government agencies available for free download as CSV files.
+
+Dataset source: https://fred.stlouisfed.org/series/UNRATE
+
+Original data source: https://www.bls.gov/cps/
+
+### 2.4 Data Collection
+
+The unemployment rate is collected monthly by the Bureau of Labor Statistics through the Current Population Survey, a nationally representative household survey conducted across approximately 60,000 households across the United States. Survey respondents are asked about their employment status during a reference week each month. A person is classified as unemployed if they were not employed during the reference week, were available for work, and had actively looked for a job in the prior four weeks. The BLS releases the results in the first or second week of each month for the prior month, and the data is then made available through the FRED database as series UNRATE.
+
+This dataset is important because the unemployment rate is a primary input for Federal Reserve monetary policy decisions under its dual mandate of maximum employment and price stability. It is also widely used by economists, policymakers, and forecasters to assess the state of the labor market and project future economic conditions. The COVID-19 period in particular offers a rare and historically significant opportunity to observe how a catastrophic external shock appears in monthly time series data and how the labor market recovered once restrictions were lifted.
+
+\newpage
+
+## 3. Methodology
+
+### 3.1 Box-Jenkins Approach and SARIMA(p,d,q)x(P,D,Q) Model
+
+The Box-Jenkins approach is a systematic framework for analyzing and forecasting time series data. The approach consists of the following steps. First, the time series is plotted and examined visually. Second, the series is transformed or differenced if necessary to achieve stationarity. Third, the differencing order is identified through stationarity testing. Fourth, ACF and PACF plots are used to identify candidate model orders. Fifth, candidate models are estimated and compared using information criteria. Sixth, residual diagnostics are performed to verify the fit. Seventh, the model is used to generate forecasts.
+
+Before fitting the ARIMA model, the data was examined for seasonal structure. Because the dataset is the officially seasonally adjusted series published by the BLS using the X-13ARIMA-SEATS procedure, a non-seasonal ARIMA model was deemed appropriate and the seasonal orders were set to zero. The first difference of the unemployment rate was computed as
+
+$$\Delta X_t = X_t - X_{t-1}$$
+
+where $X_t$ represents the unemployment rate at time $t$. The Augmented Dickey-Fuller test was used to test stationarity for both the original and the differenced series. ACF and PACF plots were used to identify possible model orders, and model selection was based on AIC comparison across candidate ARIMA specifications following the approach of Montgomery et al.
+
+### 3.2 Unit Root Testing
+
+Unit root testing following Section 5.2 of Shumway and Stoffer was applied as the second method to formally assess whether the unemployment rate series contains a unit root. A series contains a unit root if its autoregressive polynomial has a root equal to one, meaning the process behaves like a random walk and does not revert to a fixed mean over time. The presence of a unit root has direct implications for how shocks to the labor market persist over time: if unemployment contains a unit root, a shock such as a recession or pandemic has a permanent rather than transitory effect on the level of the series until some other force reverses it.
+
+The Augmented Dickey-Fuller test is based on the regression
+
+$$\nabla X_t = \gamma X_{t-1} + \sum_{j=1}^{p-1} \psi_j \nabla X_{t-j} + w_t$$
+
+where $\gamma = \sum_{j=1}^{p} \phi_j - 1$ and the null hypothesis is $H_0: \gamma = 0$, meaning the process has a unit root, against the alternative $H_1: \gamma < 0$, meaning the process is stationary. The lag order $p$ is selected by the default rule in the `tseries` package, which uses $\lfloor (n-1)^{1/3} \rfloor$ as described in Shumway and Stoffer.
+
+The Phillips-Perron test was also applied as a complement to the ADF test. The PP test differs from the ADF test primarily in how it handles serial correlation and heteroskedasticity in the errors. Rather than adding lagged difference terms to the regression, it applies a nonparametric correction to the test statistic. Both tests are applied to the original unemployment rate series and to the first-differenced series to confirm the order of integration.
+
+\newpage
+
+## 4. Results
+
+### 4.1 Results From Sarima Modeling
+
+**Original Time Series Plot**
+
+```{r fig-original, fig.height=4, fig.width=9}
+ggplot(df, aes(x = Date, y = UNRATE)) +
+  annotate("rect",
+           xmin = as.Date("2020-03-01"), xmax = as.Date("2020-12-01"),
+           ymin = -Inf, ymax = Inf,
+           fill = "firebrick", alpha = 0.12) +
+  geom_line(color = "steelblue", linewidth = 1.3) +
+  labs(
+    title = "US Monthly Unemployment Rate (2010-2023)",
+    x     = "Date",
+    y     = "Unemployment Rate (percent)"
+  ) +
+  theme_minimal()
+```
+
+The original US unemployment rate series shows a long and steady downward trend from 2010 through 2019 as the economy recovered from the Great Recession and entered a sustained expansion. The rate fell from approximately 9.8 percent in January 2010 to a low of 3.5 percent by late 2019. The shaded region marks the COVID-19 period. As documented by Cajner et al., the rate jumped from 3.5 percent in February 2020 to 14.7 percent in April 2020, an increase that was historically unprecedented since BLS data collection began in 1948 and far larger than any increase observed during the Great Recession. The rate then recovered quickly throughout 2021 and 2022 and returned to pre-pandemic levels by 2023. The series clearly does not fluctuate around a constant mean over the full sample period, which strongly suggests that the original unemployment rate data is nonstationary. The graph also shows that month-to-month variation increased substantially during the COVID-19 period relative to the rest of the sample.
+
+**First Difference of the Unemployment Rate**
+
+```{r fig-diff, fig.height=4, fig.width=9}
+diff_df <- data.frame(Date = df$Date[-1], Diff = diff(df$UNRATE))
+
+ggplot(diff_df, aes(x = Date, y = Diff)) +
+  annotate("rect",
+           xmin = as.Date("2020-03-01"), xmax = as.Date("2020-12-01"),
+           ymin = -Inf, ymax = Inf,
+           fill = "firebrick", alpha = 0.12) +
+  geom_line(color = "steelblue", linewidth = 1) +
+  geom_hline(yintercept = 0, linetype = "dashed", linewidth = 0.7) +
+  labs(
+    title = "First Difference of US Unemployment Rate",
+    x     = "Date",
+    y     = "Monthly Change in Unemployment Rate (percent)"
+  ) +
+  theme_minimal()
+```
+
+The first-differenced series appears substantially more stable than the original unemployment rate series and fluctuates around a mean close to zero, suggesting that first differencing successfully removed the nonstationarity present in the original data. The COVID-19 period is still visible as a cluster of very large spikes, particularly the April 2020 jump and the sharp negative values in the months that followed as the labor market recovered. Outside of that period the differenced series behaves much more consistently and does not show the persistent directional movement seen in the original. Overall the transformed series appears more appropriate for ARIMA modeling and stationarity analysis than the original unemployment rate.
+
+**Histogram of Monthly Unemployment Rate**
+
+```{r}
+hist(df$UNRATE,
+     breaks = 15,
+     main = "Histogram of Monthly US Unemployment Rate (2010-2023)",
+     xlab = "Unemployment Rate (percent)",
+     col = "steelblue",
+     border = "white")
+```
+The histogram shows the distribution of monthly unemployment rate values across the full sample period. The distribution is right-skewed, with the majority of observations falling below 6 percent, reflecting the extended period of low unemployment during the post-expansion and post-pandemic recovery years. Frequency decreases as the unemployment rate increases, with the exception of a slight elevation in the 7 to 10 percent range corresponding to the early 2010s recovery period. The isolated bars at 13 and 14 percent represent the COVID-19 spike in April 2020 and stand clearly apart from the rest of the distribution, confirming that the pandemic shock was an extreme outlier rather than part of the series' ordinary range of variation.
+
+
+**Average Annual Unemployment Rate**
+
+```{r fig-annual, fig.height=4, fig.width=6}
+yearly_avg <- df %>%
+  mutate(Year = as.numeric(format(Date, "%Y"))) %>%
+  group_by(Year) %>%
+  summarize(AvgRate = mean(UNRATE), .groups = "drop")
+
+ggplot(yearly_avg, aes(x = Year, y = AvgRate)) +
+  geom_line(color = "darkgreen", linewidth = 1.2) +
+  geom_point(color = "darkgreen", size = 2.5) +
+  scale_x_continuous(breaks = seq(2010, 2023, by = 2), limits = c(2010, 2023)) +
+  labs(
+    title = "Average Annual US Unemployment Rate (2010-2023)",
+    x = "Year",
+    y = "Average Unemployment Rate (percent)"
+  ) +
+  theme_minimal()
+```
+
+The year-over-year average plot zooms out from the noisy month-to-month data and shows the underlying direction of the labor market across the full sample. The annual average fell steadily from around 9.6 percent in 2010 to a low of approximately 3.6 percent in 2019, reflecting a decade of uninterrupted job growth following the Great Recession. The 2020 annual average rose to about 8.1 percent as a result of the pandemic shock, though this figure understates the severity of the April 2020 peak since it averages across the full calendar year. The recovery was swift, with the annual average falling back to around 5.4 percent in 2021 and returning to pre-pandemic lows near 3.6 percent by 2022 and 2023, confirming the rapid labor market rebound documented in the literature.
+
+**Seasonal Pattern by Calendar Month**
+
+```{r fig-monthly, fig.height=4, fig.width=9}
+df_nc <- df %>%
+  filter(!(Date >= as.Date("2020-03-01") & Date <= as.Date("2020-12-01"))) %>%
+  mutate(Month = factor(month.abb[month(Date)], levels = month.abb))
+
+monthly_avg <- df_nc %>%
+  group_by(Month) %>%
+  summarise(avg = mean(UNRATE), .groups = "drop")
+
+ggplot(monthly_avg, aes(x = Month, y = avg)) +
+  geom_col(fill = "steelblue", alpha = 0.85, width = 0.7) +
+  geom_hline(yintercept = mean(monthly_avg$avg),
+             linetype = "dashed", color = "firebrick", linewidth = 0.8) +
+  labs(
+    title = "Average Unemployment Rate by Calendar Month (COVID-19 months excluded)",
+    x     = "Month",
+    y     = "Average Unemployment Rate (percent)"
+  ) +
+  coord_cartesian(ylim = c(4.5, 6.5)) +
+  theme_minimal()
+```
+
+The bar chart shows the average unemployment rate for each calendar month across the sample with the COVID-19 months excluded so the pandemic spike does not distort the seasonal pattern. The dashed line marks the overall monthly average. March shows the highest average unemployment rate, with January and April also sitting above the overall average, while November and December show the lowest values. The seasonal effect is modest in magnitude, with the spread between the highest and lowest months spanning less than half a percentage point, but it is consistent across years and represents a real calendar-driven pattern tied to post-holiday layoffs and end-of-year hiring cycles. This pattern is consistent with known calendar-driven hiring cycles and makes this dataset well suited to time series analysis.
+
+### 4.2 Unit Root Results
+
+**Augmented Dickey-Fuller Test**
+
+```{r adf-original}
+adf.test(ts_data)
+```
+
+```{r adf-diff}
+adf.test(diff_data)
+```
+
+**Phillips-Perron Test**
+
+```{r pp-test}
+pp.test(ts_data)
+pp.test(diff_data)
+```
+
+The Augmented Dickey-Fuller and Phillips-Perron tests were applied to both the original unemployment rate series and the first-differenced series following the unit root testing framework in Section 5.2 of Shumway and Stoffer. Both tests share the null hypothesis that the series contains a unit root and is nonstationary, with the alternative that the series is stationary. The PP test complements the ADF test by using a nonparametric correction for serial correlation rather than adding lagged difference terms, making the two tests informative as a pair.
+
+For the original unemployment rate series, the ADF test produced a p-value of 0.235, which does not reject the null hypothesis of a unit root at any conventional significance level. The PP test produced a p-value of 0.033, which technically rejects the null at the 5 percent level. The two tests disagree on the original series. This kind of disagreement is documented in the unit root literature and is particularly common when the series contains a structural break, because the PP test's nonparametric correction can be distorted by large outliers. The April 2020 COVID-19 spike is exactly that kind of outlier, and its presence in the estimation sample likely inflates the PP test statistic toward spurious rejection. As noted by Shumway and Stoffer, the standard ADF and PP tests assume no structural breaks, so results should be interpreted with caution when a break is present. Taking the ADF result, the visual evidence of a strong downward trend with no mean reversion, and the known COVID structural break together, the weight of evidence supports treating the original series as nonstationary and containing a unit root.
+
+After first differencing, both tests strongly and unambiguously reject the null hypothesis. The ADF produced a p-value below 0.01 and the PP test produced a p-value below 0.01. The agreement between the two tests on the differenced series provides robust evidence that one difference is the correct transformation and that the unemployment rate is integrated of order one, written I(1). This confirms that differencing before fitting the ARIMA model was appropriate and that the series does not require further differencing.
+
+### 4.3 ACF and PACF Analysis
+
+**ACF and PACF of the Original Series**
+
+```{r fig-acf-orig, fig.height=3.5, fig.width=10}
+par(mfrow = c(1, 2))
+acf(ts_data,  lag.max = 36, main = "ACF of Unemployment Rate")
+pacf(ts_data, lag.max = 36, main = "PACF of Unemployment Rate")
+par(mfrow = c(1, 1))
+```
+
+The ACF plot for the original unemployment rate series shows very slow and gradual decay across many lags, with significant autocorrelation persisting well beyond lag 20. This pattern of slow decay is a well-known indicator of nonstationarity and confirms the ADF test result. The PACF drops off sharply after lag 1, indicating strong first-order autoregressive dependence in the original levels. Together these patterns are consistent with what Montgomery et al. described for the US unemployment rate series and confirm that differencing is needed before fitting an ARIMA model.
+
+**ACF and PACF of the Differenced Series**
+
+```{r fig-acf-diff, fig.height=3.5, fig.width=10}
+par(mfrow = c(1, 2))
+acf(diff_data,  lag.max = 36, main = "ACF of First-Differenced Series")
+pacf(diff_data, lag.max = 36, main = "PACF of First-Differenced Series")
+par(mfrow = c(1, 1))
+```
+
+After first differencing, the ACF and PACF plots show much clearer patterns than the original series. The ACF shows a spike at lag 1 that falls near the edge of the significance bounds, followed by values within the bounds at higher lags, which is broadly consistent with a moving average component. The PACF shows significant negative spikes at the first few lags, with values falling below the lower significance bound at lags 1 and 2, suggesting an autoregressive component is also present. These patterns together indicate that an ARIMA model with both AR and MA terms applied to the differenced series is a reasonable starting point. Unlike financial return series where ACF and PACF plots often appear nearly flat, the unemployment rate shows genuine autocorrelation structure that makes it well suited to the Box-Jenkins framework.
+
+### 4.4 ARIMA Modeling
+
+**Automatic ARIMA Model Selection**
+
+```{r model-selection}
+candidates <- list(
+  "ARIMA(1,1,0)" = Arima(ts_data, order = c(1,1,0)),
+  "ARIMA(0,1,1)" = Arima(ts_data, order = c(0,1,1)),
+  "ARIMA(1,1,1)" = Arima(ts_data, order = c(1,1,1)),
+  "ARIMA(2,1,0)" = Arima(ts_data, order = c(2,1,0)),
+  "ARIMA(0,1,2)" = Arima(ts_data, order = c(0,1,2)),
+  "ARIMA(1,1,2)" = Arima(ts_data, order = c(1,1,2)),
+  "ARIMA(2,1,1)" = Arima(ts_data, order = c(2,1,1)),
+  "ARIMA(2,1,2)" = Arima(ts_data, order = c(2,1,2))
+)
+
+comp <- data.frame(
+  Model = names(candidates),
+  AIC   = sapply(candidates, AIC),
+  BIC   = sapply(candidates, BIC)
+)
+comp[order(comp$AIC), ]
+```
+
+```{r fit-final}
+fit <- Arima(ts_data, order = c(1,1,2))
+summary(fit)
+```
+
+The ACF of the differenced series showed a spike near the significance boundary at lag 1, consistent with a moving average component, and the PACF showed significant negative spikes at lags 1 and 2, suggesting an autoregressive component is present. Eight candidate ARIMA models were estimated and ranked by AIC. The model with the lowest AIC is ARIMA(1,1,2), meaning an autoregressive term of order 1, one degree of differencing, and a moving average component of order 2. This model is selected as the final model. The autoregressive coefficient and the first moving average coefficient are both statistically significant, confirming genuine predictable structure in the unemployment rate data. The second moving average coefficient is not statistically significant at the conventional level, but the model is retained because it achieves the best overall fit by AIC. This result is consistent with prior research. Dritsaki found that ARIMA models with both AR and MA components performed well for monthly unemployment data, and the ARIMA(1,1,2) model found here is similar to specifications used in the unemployment forecasting literature.
+
+**SARIMA Comparison**
+
+```{r sarima-fit}
+fit_sarima <- auto.arima(ts_data, seasonal = TRUE, stepwise = FALSE, approximation = FALSE)
+summary(fit_sarima)
+```
+
+As a robustness check, auto.arima() was used to search over both non-seasonal and seasonal ARIMA specifications. The model it selected was ARIMA(1,1,2) with no seasonal orders, which is identical to the model chosen through manual AIC comparison above. The AIC is 426.17 in both cases. This result confirms that the seasonal adjustment already applied by the BLS removed the seasonal structure from the series, and that adding seasonal terms does not improve the fit at all. The non-seasonal ARIMA(1,1,2) is retained as the final model.
+
+**Residual Diagnostics**
+
+```{r fig-residuals, fig.height=5.5, fig.width=9}
+resid_df <- data.frame(
+  Date     = df$Date,
+  Residual = as.numeric(residuals(fit))
+)
+
+ggplot(resid_df, aes(x = Date, y = Residual)) +
+  geom_line(color = "grey30", linewidth = 0.8) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red", linewidth = 0.7) +
+  labs(
+    title = "Residuals from ARIMA(1,1,2)",
+    x     = "Date",
+    y     = "Residual"
+  ) +
+  coord_cartesian(ylim = c(-3, 12)) +
+  theme_minimal()
+```
+
+```{r ljungbox}
+acf(residuals(fit), lag.max = 36, main = "ACF of Residuals from ARIMA(1,1,2)")
+
+Box.test(residuals(fit), lag = 10, type = "Ljung-Box", fitdf = 3)
+```
+
+
+
+```{r}
+hist(residuals(fit),
+     breaks = 30,
+     col = "steelblue",
+     border = "white",
+     main = "Histogram of Residuals from ARIMA(1,1,2)",
+     xlab = "Residuals",
+     xlim   = c(-3, 4))
+```
+
+The residual diagnostics for the ARIMA(1,1,2) model confirm an adequate fit. The residual series fluctuates around zero with no systematic pattern for most of the sample period. The large spike visible during the COVID-19 period reflects the fact that the April 2020 shock was an extraordinary event outside the range of what a standard ARIMA model can capture, which is consistent with what Cajner et al. described as a historically unprecedented labor market disruption. The residual ACF shows nearly all values within the significance bounds, indicating that very little autocorrelation remains in the residuals after fitting the model. The histogram of residuals is approximately bell-shaped and centered near zero, consistent with a white noise process, though the COVID-19 spike creates a heavy tail on the right side. The Ljung-Box test produced a p-value well above 0.05, providing no evidence of remaining serial correlation in the residuals. Together these diagnostics support ARIMA(1,1,2) as a well-fitted model for the US monthly unemployment rate series.
+
+
+
+**Forecasting**
+
+```{r fig-forecast, fig.height=4.5, fig.width=9}
+fcast <- forecast(fit, h = 24)
+autoplot(fcast) +
+  labs(
+    title = "Forecasts from ARIMA(1,1,2)",
+    x     = "Year",
+    y     = "Unemployment Rate (percent)"
+  ) +
+  theme_minimal()
+```
+
+The forecast generated from the ARIMA(1,1,2) model predicts that the unemployment rate will remain near its recent level over the next 24 months, holding close to the historically low post-pandemic values. The forecast line is nearly flat, which reflects the fact that after differencing the series has limited mean structure remaining to drive a strong directional prediction. The prediction intervals widen substantially as the forecast horizon increases, reflecting growing uncertainty further into the future, and the intervals are notably wide given the volatility introduced by the COVID-19 period in the estimation sample. This result is consistent with an economy where unemployment had stabilized near historically low levels at the end of the sample period, and is consistent with the unit root finding. Because the series is I(1), the best long-run forecast is simply to hold the most recent level constant.
+
+
+
+\newpage
+
+## 5. Conclusion and Future Study
+
+This project analyzed the US monthly unemployment rate from January 2010 through December 2023 using time series methods. The original series showed a long downward trend from the post-recession recovery through 2019, followed by the historic COVID-19 spike in April 2020 that Cajner et al. documented as the largest single-month increase in unemployment since BLS data collection began in 1948. First differencing made the series stationary, which is what allowed us to fit an ARIMA model to it.
+
+The Box-Jenkins approach was applied using ARIMA modeling techniques. The ACF and PACF of the differenced series showed meaningful autocorrelation structure, with the ACF showing a spike near the significance boundary at lag 1 and the PACF showing significant negative spikes at lags 1 and 2, consistent with a model containing both AR and MA terms. This is a meaningful contrast to financial return series where these plots typically show near-white-noise behavior with no significant structure to model. Model comparison across eight candidate ARIMA specifications using AIC selected ARIMA(1,1,2) as the best-fitting model, consistent with ARIMA structures found in the unemployment forecasting literature by Montgomery et al. and Dritsaki. The AR and first MA coefficients were statistically significant, confirming genuine predictable structure in the data. The 24-month forecast predicts that the unemployment rate will remain near its recent level, reflecting the stabilization of the labor market at historically low post-pandemic values, with wide prediction intervals that reflect uncertainty inflated by the COVID-19 period in the estimation sample.
+
+Unit root testing was applied as the second method, following Section 5.2 of Shumway and Stoffer. The ADF test did not reject the null hypothesis of a unit root in the original series, while the PP test did reject it at the 5 percent level. This disagreement is likely because the PP test is more sensitive to large outliers, and the April 2020 spike is exactly that kind of observation. Given the ADF result, the visual evidence of nonstationarity, and the known structural break, the original series was treated as containing a unit root. Both tests clearly rejected the null for the differenced series, confirming I(1). The practical implication is that shocks to unemployment, like COVID, do not automatically reverse on their own.
+
+The most important finding of this study is that the US unemployment rate has real and meaningful time series structure that makes it well suited to the Box-Jenkins approach combined with formal unit root analysis. The ARIMA(1,1,2) model fits the differenced series well, and the unit root results provide formal justification for the differencing transformation and tell a clear story about how labor market shocks persist over time. Future studies could extend this project by incorporating an intervention term to formally model the COVID-19 structural break, which would improve residual diagnostics and forecast reliability. The standard ADF test assumes no structural breaks in the series, so applying a unit root test that explicitly accounts for the 2020 break, such as the Zivot-Andrews test, would be a natural extension. Including additional economic variables such as GDP growth, inflation, or Federal Reserve interest rate decisions in a multivariate model could also improve forecast accuracy. Applying SARIMA models to a non-seasonally adjusted version of the unemployment rate would allow the seasonal structure to be modeled directly within the ARIMA framework, as demonstrated by Dritsaki for monthly labor market data. Finally, comparing unemployment rate dynamics across demographic groups or US regions could reveal important heterogeneity that aggregate models cannot capture.
+
+\newpage
+
+## References
+
+
+Cajner, T., Crane, L. D., Decker, R. A., Grigsby, J., Hamins-Puertolas, A., Hurst, E., Kurz, C., and Yildirmaz, A. (2020). The US labor market during the beginning of the pandemic recession. Brookings Papers on Economic Activity, 2020, 3-33.
+
+Dritsaki, C. (2016). Forecast of SARIMA models: An application to unemployment rates of Greece. American Journal of Applied Mathematics and Statistics, 4(5), 136-148.
+
+Federal Reserve Bank of St. Louis. Unemployment Rate (UNRATE). FRED Economic Data. https://fred.stlouisfed.org/series/UNRATE
+
+Montgomery, A. L., Zarnowitz, V., Tsay, R. S., and Tiao, G. C. (1998). Forecasting the US unemployment rate. Journal of the American Statistical Association, 93(442), 478-493.
+
+Shumway, R. H. and Stoffer, D. S. (2017). Time Series Analysis and Its Applications: With R Examples, 4th ed. Springer.
+
+Proietti, T. (2003). Forecasting the US unemployment rate. Computational Statistics and Data Analysis, 42(3), 451-476.
+
+\newpage
+
+## Appendix
+
+### R Packages Used
+
+```{r pkg, echo=TRUE, eval=FALSE}
+library(tidyverse)
+library(forecast)
+library(tseries)
+library(ggplot2)
+```
+
+### Data Import and Filtering
+
+```{r data-appendix, echo=TRUE, eval=FALSE}
+# Download UNRATE.csv from https://fred.stlouisfed.org/series/UNRATE
+# Click "Download Data" and save the file as UNRATE.csv in your working directory
+
+unrate_raw <- read.csv("UNRATE.csv")
+unrate_raw$DATE <- as.Date(unrate_raw$DATE)
+
+df <- unrate_raw %>%
+  filter(DATE >= as.Date("2010-01-01") & DATE <= as.Date("2023-12-01")) %>%
+  rename(Date = DATE, UNRATE = UNRATE)
+
+ts_data   <- ts(df$UNRATE, start = c(2010, 1), frequency = 12)
+diff_data <- diff(ts_data)
+
+head(df)
+nrow(df)
+```
+
+### Exploratory Analysis
+
+```{r eda-appendix, echo=TRUE, eval=FALSE}
+ggplot(df, aes(x = Date, y = UNRATE)) +
+  geom_line(color = "steelblue", linewidth = 1.3) +
+  labs(title = "US Monthly Unemployment Rate (2010-2023)",
+       x = "Date", y = "Unemployment Rate (percent)") +
+  theme_minimal()
+
+diff_df <- data.frame(Date = df$Date[-1], Diff = diff(df$UNRATE))
+ggplot(diff_df, aes(x = Date, y = Diff)) +
+  geom_line(color = "steelblue", linewidth = 1) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  labs(title = "First Difference of US Unemployment Rate",
+       x = "Date", y = "Monthly Change (percent)") +
+  theme_minimal()
+
+hist(ts_data,
+     breaks = 20,
+     col = "steelblue",
+     border = "white",
+     main = "Histogram of Monthly US Unemployment Rate (2010-2023)",
+     xlab = "Unemployment Rate (percent)")
+
+covid_months <- as.Date(c("2020-03-01", "2020-04-01", "2020-05-01",
+                           "2020-06-01", "2020-07-01", "2020-08-01"))
+df_no_covid <- df %>% filter(!Date %in% covid_months)
+monthly_avg <- df_no_covid %>%
+  mutate(Month = format(Date, "%b"),
+         MonthNum = as.numeric(format(Date, "%m"))) %>%
+  group_by(Month, MonthNum) %>%
+  summarize(AvgRate = mean(UNRATE), .groups = "drop") %>%
+  arrange(MonthNum)
+
+overall_avg <- mean(df_no_covid$UNRATE)
+
+ggplot(monthly_avg, aes(x = reorder(Month, MonthNum), y = AvgRate)) +
+  geom_col(fill = "steelblue") +
+  geom_hline(yintercept = overall_avg, linetype = "dashed", color = "red") +
+  labs(title = "Average Unemployment Rate by Calendar Month (COVID-19 months excluded)",
+       x = "Month", y = "Average Unemployment Rate (percent)") +
+  theme_minimal()
+
+yearly_avg <- df %>%
+  mutate(Year = as.numeric(format(Date, "%Y"))) %>%
+  group_by(Year) %>%
+  summarize(AvgRate = mean(UNRATE), .groups = "drop")
+
+ggplot(yearly_avg, aes(x = Year, y = AvgRate)) +
+  geom_line(color = "darkgreen", linewidth = 1.2) +
+  geom_point(color = "darkgreen", size = 2.5) +
+  scale_x_continuous(breaks = seq(2010, 2023, by = 2), limits = c(2010, 2023)) +
+  labs(title = "Average Annual US Unemployment Rate (2010-2023)",
+       x = "Year", y = "Average Unemployment Rate (percent)") +
+  theme_minimal()
+```
+
+### ACF and PACF
+
+```{r acf-appendix, echo=TRUE, eval=FALSE}
+acf(ts_data,        lag.max = 36, main = "ACF of Unemployment Rate")
+pacf(ts_data,       lag.max = 36, main = "PACF of Unemployment Rate")
+acf(diff(ts_data),  lag.max = 36, main = "ACF of First-Differenced Series")
+pacf(diff(ts_data), lag.max = 36, main = "PACF of First-Differenced Series")
+```
+
+### Model Comparison
+
+```{r model-appendix, echo=TRUE, eval=FALSE}
+library(forecast)
+
+candidates <- list(
+  "ARIMA(1,1,0)" = Arima(ts_data, order = c(1,1,0)),
+  "ARIMA(0,1,1)" = Arima(ts_data, order = c(0,1,1)),
+  "ARIMA(1,1,1)" = Arima(ts_data, order = c(1,1,1)),
+  "ARIMA(2,1,0)" = Arima(ts_data, order = c(2,1,0)),
+  "ARIMA(0,1,2)" = Arima(ts_data, order = c(0,1,2)),
+  "ARIMA(1,1,2)" = Arima(ts_data, order = c(1,1,2)),
+  "ARIMA(2,1,1)" = Arima(ts_data, order = c(2,1,1)),
+  "ARIMA(2,1,2)" = Arima(ts_data, order = c(2,1,2))
+)
+
+comp <- data.frame(
+  Model = names(candidates),
+  AIC   = sapply(candidates, AIC),
+  BIC   = sapply(candidates, BIC)
+)
+print(comp[order(comp$AIC), ])
+```
+
+### ARIMA Modeling
+
+```{r arima-appendix, echo=TRUE, eval=FALSE}
+fit <- Arima(ts_data, order = c(1,1,2))
+summary(fit)
+checkresiduals(fit)
+Box.test(residuals(fit), lag = 10, type = "Ljung-Box", fitdf = 3)
+
+fcast <- forecast(fit, h = 24)
+autoplot(fcast)
+```
+
+### SARIMA Comparison
+
+```{r sarima-appendix, echo=TRUE, eval=FALSE}
+fit_sarima <- auto.arima(ts_data, seasonal = TRUE,
+                          stepwise = FALSE, approximation = FALSE)
+summary(fit_sarima)
+```
+
+### Unit Root Testing
+
+```{r unitroot-appendix, echo=TRUE, eval=FALSE}
+library(tseries)
+adf.test(ts_data)
+adf.test(diff_data)
+pp.test(ts_data)
+pp.test(diff_data)
+```
